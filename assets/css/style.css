@@ -235,7 +235,6 @@ body {
 }
 
 /* Sidebar */
-/* Sidebar */
 .sidebar {
     width: 280px;
     background: linear-gradient(180deg, var(--primary) 0%, var(--primary-dark) 100%);
