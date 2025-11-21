@@ -9,28 +9,29 @@ if (!empty($user_profile['profile_image']) && file_exists($user_profile['profile
 }
 ?>
 <aside class="sidebar" id="sidebar">
-    <div class="sidebar-header">
-        <div class="logo">
-            <img src="assets/images/logo.png" alt="Logo" 
-                 onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=<?php echo urlencode(substr(APP_NAME, 0, 2)); ?>&size=50&background=ffffff&color=1976d2&bold=true';">
-            <div class="logo-text">
-                <h2><?php echo APP_NAME; ?></h2>
-                <p><?php echo APP_TAGLINE; ?></p>
+    <div class="sidebar-content">
+        <div class="sidebar-header">
+            <div class="logo">
+                <img src="assets/images/logo.png" alt="Logo" 
+                     onerror="this.onerror=null; this.src='https://ui-avatars.com/api/?name=<?php echo urlencode(substr(APP_NAME, 0, 2)); ?>&size=50&background=ffffff&color=1976d2&bold=true';">
+                <div class="logo-text">
+                    <h2><?php echo APP_NAME; ?></h2>
+                    <p><?php echo APP_TAGLINE; ?></p>
+                </div>
+            </div>
+            <div class="user-info">
+                <img src="<?php echo htmlspecialchars($profile_image); ?>" 
+                     alt="Profile" 
+                     class="user-avatar" 
+                     style="width: 45px; height: 45px; border-radius: 50%; object-fit: cover; background: white;"
+                     onerror="this.src='https://ui-avatars.com/api/?name=<?php echo urlencode($_SESSION['full_name']); ?>&size=45&background=1976d2&color=fff&bold=true'">
+                <div class="user-details">
+                    <h4><?php echo htmlspecialchars($_SESSION['full_name']); ?></h4>
+                    <p><?php echo get_role_display($_SESSION['role']); ?></p>
+                </div>
             </div>
         </div>
-        <div class="user-info">
-            <img src="<?php echo htmlspecialchars($profile_image); ?>" 
-                 alt="Profile" 
-                 class="user-avatar" 
-                 style="width: 45px; height: 45px; border-radius: 50%; object-fit: cover; background: white;"
-                 onerror="this.src='https://ui-avatars.com/api/?name=<?php echo urlencode($_SESSION['full_name']); ?>&size=45&background=1976d2&color=fff&bold=true'">
-            <div class="user-details">
-                <h4><?php echo htmlspecialchars($_SESSION['full_name']); ?></h4>
-                <p><?php echo get_role_display($_SESSION['role']); ?></p>
-            </div>
-        </div>
-    </div>
-    <ul class="nav-menu">
+        <ul class="nav-menu">
         <?php
         $pages = [
             'dashboard' => ['icon' => 'chart-line', 'label' => 'Dashboard'],
@@ -67,7 +68,9 @@ if (!empty($user_profile['profile_image']) && file_exists($user_profile['profile
         }
         ?>
     </ul>
-    <a href="logout.php" class="logout-btn" onclick="return confirm('Are you sure you want to logout?')">
-        <i class="fas fa-sign-out-alt"></i> Logout
-    </a>
+    <div style="padding: 0 15px 20px 15px;">
+        <a href="logout.php" class="logout-btn" onclick="return confirm('Are you sure you want to logout?')">
+            <i class="fas fa-sign-out-alt"></i> Logout
+        </a>
+    </div>
 </aside>
