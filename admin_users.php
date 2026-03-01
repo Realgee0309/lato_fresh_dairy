@@ -9,6 +9,38 @@ if (!has_permission('admin')) {
     exit();
 }
 
+// Handle user deletion FIRST — before any redirect logic
+if (isset($_GET['delete_user'])) {
+    $target_user_id = intval($_GET['delete_user']);
+
+    if ($target_user_id <= 0) {
+        $_SESSION['notification'] = ['message' => 'Invalid user ID.', 'type' => 'error'];
+    } elseif ($target_user_id == $_SESSION['user_id']) {
+        $_SESSION['notification'] = ['message' => 'You cannot delete your own account!', 'type' => 'error'];
+    } else {
+        $user_result = $db->query("SELECT username, profile_image FROM users WHERE id = $target_user_id");
+        if (!$user_result || $user_result->num_rows === 0) {
+            $_SESSION['notification'] = ['message' => 'User not found.', 'type' => 'error'];
+        } else {
+            $user = $user_result->fetch_assoc();
+            if (!empty($user['profile_image']) && file_exists($user['profile_image'])) {
+                unlink($user['profile_image']);
+            }
+            $delete_result = $db->query("DELETE FROM users WHERE id = $target_user_id");
+            // Re-fetch to confirm deletion
+            $check = $db->query("SELECT id FROM users WHERE id = $target_user_id");
+            if ($delete_result && $check->num_rows === 0) {
+                log_audit('delete', "Admin deleted user: {$user['username']}");
+                $_SESSION['notification'] = ['message' => 'User "' . htmlspecialchars($user['username']) . '" deleted successfully!', 'type' => 'success'];
+            } else {
+                $_SESSION['notification'] = ['message' => 'Delete failed — please try again.', 'type' => 'error'];
+            }
+        }
+    }
+    header('Location: admin_users.php');
+    exit();
+}
+
 // Get user to edit (default to first user or from URL)
 $edit_user_id = isset($_GET['user_id']) ? intval($_GET['user_id']) : 0;
 
@@ -36,7 +68,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_profile_image'
         
         if (in_array($file_extension, $allowed_extensions)) {
             if ($_FILES['profile_image']['size'] <= 5000000) {
-                // Delete old profile image if exists
                 $old_image_result = $db->query("SELECT profile_image FROM users WHERE id = $target_user_id");
                 if ($old_image_result && $old_image_result->num_rows > 0) {
                     $old_image = $old_image_result->fetch_assoc()['profile_image'];
@@ -51,7 +82,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_profile_image'
                 if (move_uploaded_file($_FILES['profile_image']['tmp_name'], $target_file)) {
                     $stmt = $db->prepare("UPDATE users SET profile_image = ? WHERE id = ?");
                     $stmt->bind_param("si", $target_file, $target_user_id);
-                    
                     if ($stmt->execute()) {
                         $_SESSION['notification'] = ['message' => 'Profile image updated successfully!', 'type' => 'success'];
                         log_audit('update', "Admin updated profile image for user ID: $target_user_id");
@@ -78,7 +108,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
     $role = sanitize_input($_POST['role']);
     $active = isset($_POST['active']) ? 1 : 0;
     
-    // Check if username is already taken by another user
     $check_username = $db->query("SELECT id FROM users WHERE username = '$username' AND id != $target_user_id");
     if ($check_username->num_rows > 0) {
         $_SESSION['notification'] = ['message' => 'Username already taken!', 'type' => 'error'];
@@ -90,7 +119,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_profile'])) {
             $_SESSION['notification'] = ['message' => 'User profile updated successfully!', 'type' => 'success'];
             log_audit('update', "Admin updated profile for user: $username");
             
-            // Update session if editing own profile
             if ($target_user_id == $_SESSION['user_id']) {
                 $_SESSION['full_name'] = $full_name;
                 $_SESSION['email'] = $email;
@@ -125,30 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['reset_password'])) {
     exit();
 }
 
-// Handle user deletion
-if (isset($_GET['delete_user'])) {
-    $target_user_id = intval($_GET['delete_user']);
-    
-    // Cannot delete yourself
-    if ($target_user_id == $_SESSION['user_id']) {
-        $_SESSION['notification'] = ['message' => 'You cannot delete your own account!', 'type' => 'error'];
-    } else {
-        $user = $db->query("SELECT username, profile_image FROM users WHERE id = $target_user_id")->fetch_assoc();
-        if ($user) {
-            // Delete profile image
-            if ($user['profile_image'] && file_exists($user['profile_image'])) {
-                unlink($user['profile_image']);
-            }
-            
-            $db->query("DELETE FROM users WHERE id = $target_user_id");
-            log_audit('delete', "Admin deleted user: {$user['username']}");
-            $_SESSION['notification'] = ['message' => 'User deleted successfully!', 'type' => 'success'];
-        }
-    }
-    
-    echo '<script>window.location.href = "admin_users.php";</script>';
-    exit();
-}
+
 
 // Handle add new user
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
@@ -158,7 +163,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_user'])) {
     $email = sanitize_input($_POST['new_email']);
     $role = sanitize_input($_POST['new_role']);
     
-    // Check if username already exists
     $check = $db->query("SELECT id FROM users WHERE username = '$username'");
     if ($check->num_rows > 0) {
         $_SESSION['notification'] = ['message' => 'Username already exists', 'type' => 'error'];
@@ -250,9 +254,7 @@ $recent_activity = $db->query("SELECT action, description, created_at
             gap: 12px;
         }
         
-        .user-list-item:hover {
-            background: #f5f5f5;
-        }
+        .user-list-item:hover { background: #f5f5f5; }
         
         .user-list-item.active {
             background: #e3f2fd;
@@ -266,9 +268,7 @@ $recent_activity = $db->query("SELECT action, description, created_at
             object-fit: cover;
         }
         
-        .user-list-info {
-            flex: 1;
-        }
+        .user-list-info { flex: 1; }
         
         .user-list-name {
             font-weight: 600;
@@ -302,9 +302,7 @@ $recent_activity = $db->query("SELECT action, description, created_at
             gap: 25px;
         }
         
-        .profile-image-container {
-            position: relative;
-        }
+        .profile-image-container { position: relative; }
         
         .profile-image {
             width: 120px;
@@ -411,9 +409,7 @@ $recent_activity = $db->query("SELECT action, description, created_at
             justify-content: center;
         }
         
-        .modal.active {
-            display: flex;
-        }
+        .modal.active { display: flex; }
         
         .modal-content {
             background: white;
@@ -497,7 +493,8 @@ $recent_activity = $db->query("SELECT action, description, created_at
 </head>
 <body>
     <div class="admin-container">
-        <!-- Users Sidebar -->
+
+        <!-- ===== USERS SIDEBAR ===== -->
         <div class="users-sidebar">
             <div class="users-sidebar-header">
                 <h3><i class="fas fa-users-cog"></i> All Users</h3>
@@ -514,7 +511,8 @@ $recent_activity = $db->query("SELECT action, description, created_at
                 }
                 $is_active = ($user['id'] == $edit_user_id) ? 'active' : '';
             ?>
-            <div class="user-list-item <?php echo $is_active; ?>" onclick="window.location.href='admin_users.php?user_id=<?php echo $user['id']; ?>'">
+            <div class="user-list-item <?php echo $is_active; ?>" 
+                 onclick="window.location.href='admin_users.php?user_id=<?php echo $user['id']; ?>'">
                 <img src="<?php echo $user_avatar; ?>" class="user-list-avatar" alt="Avatar">
                 <div class="user-list-info">
                     <div class="user-list-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
@@ -525,21 +523,180 @@ $recent_activity = $db->query("SELECT action, description, created_at
                 </div>
             </div>
             <?php endwhile; ?>
-        </div>
-        
-        <!-- User Content -->
+        </div><!-- end .users-sidebar -->
+
+        <!-- ===== USER CONTENT ===== -->
         <div class="user-content">
-            
+
             <?php if (isset($_SESSION['notification'])): ?>
                 <div class="alert alert-<?php echo $_SESSION['notification']['type'] === 'success' ? 'success' : 'error'; ?>">
                     <i class="fas fa-<?php echo $_SESSION['notification']['type'] === 'success' ? 'check-circle' : 'times-circle'; ?>"></i>
                     <span><?php echo $_SESSION['notification']['message']; ?></span>
                 </div>
                 <?php unset($_SESSION['notification']); ?>
-                                <?php endif; ?>
+            <?php endif; ?>
+
+            <!-- Profile Header -->
+            <div class="profile-header-admin">
+                <div class="profile-image-container">
+                    <img src="<?php echo htmlspecialchars($profile_image); ?>" alt="Profile" class="profile-image" id="profilePreview">
+                    <form method="POST" enctype="multipart/form-data" id="imageForm" style="display: inline;">
+                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
+                        <input type="hidden" name="upload_profile_image" value="1">
+                        <label for="imageInput" class="profile-image-upload">
+                            <i class="fas fa-camera" style="color: #1976d2;"></i>
+                        </label>
+                        <input type="file" id="imageInput" name="profile_image" style="display: none;" accept="image/*">
+                    </form>
                 </div>
-            </div>
-            
+                <div class="profile-info" style="flex: 1;">
+                    <h1><?php echo htmlspecialchars($user_data['full_name']); ?></h1>
+                    <p style="font-size: 16px; opacity: 0.9;">@<?php echo htmlspecialchars($user_data['username']); ?></p>
+                    <p style="font-size: 14px; opacity: 0.85;"><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($user_data['email']); ?></p>
+                    <div style="display: flex; gap: 10px; margin-top: 10px;">
+                        <span class="profile-badge">
+                            <i class="fas fa-shield-alt"></i> <?php echo get_role_display($user_data['role']); ?>
+                        </span>
+                        <span class="profile-badge" style="background: <?php echo $user_data['active'] ? 'rgba(76,175,80,0.3)' : 'rgba(239,83,80,0.3)'; ?>">
+                            <i class="fas fa-circle" style="font-size: 8px;"></i> 
+                            <?php echo $user_data['active'] ? 'Active' : 'Inactive'; ?>
+                        </span>
+                    </div>
+                    
+                    <div class="stats-mini">
+                        <div class="stat-mini">
+                            <div class="stat-mini-value"><?php echo $activity_stats['days_active']; ?></div>
+                            <div class="stat-mini-label">Days Active</div>
+                        </div>
+                        <div class="stat-mini">
+                            <div class="stat-mini-value"><?php echo $activity_stats['total_actions']; ?></div>
+                            <div class="stat-mini-label">Actions</div>
+                        </div>
+                        <div class="stat-mini">
+                            <div class="stat-mini-value">
+                                <?php 
+                                if ($activity_stats['last_activity']) {
+                                    $days = floor((time() - strtotime($activity_stats['last_activity'])) / 86400);
+                                    echo $days . 'd';
+                                } else {
+                                    echo 'Never';
+                                }
+                                ?>
+                            </div>
+                            <div class="stat-mini-label">Last Seen</div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- end .profile-header-admin -->
+
+            <!-- Edit Profile & Reset Password -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
+                <!-- Edit Profile -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-user-edit"></i> Edit User Profile</div>
+                    </div>
+                    <form method="POST">
+                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
+                        
+                        <div class="form-group">
+                            <label>Full Name</label>
+                            <input type="text" name="full_name" value="<?php echo htmlspecialchars($user_data['full_name']); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Username</label>
+                            <input type="text" name="username" value="<?php echo htmlspecialchars($user_data['username']); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Email</label>
+                            <input type="email" name="email" value="<?php echo htmlspecialchars($user_data['email']); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Role</label>
+                            <select name="role" required>
+                                <option value="admin"    <?php echo $user_data['role'] == 'admin'     ? 'selected' : ''; ?>>Administrator</option>
+                                <option value="manager"  <?php echo $user_data['role'] == 'manager'   ? 'selected' : ''; ?>>Manager</option>
+                                <option value="sales"    <?php echo $user_data['role'] == 'sales'     ? 'selected' : ''; ?>>Sales Clerk</option>
+                                <option value="warehouse"<?php echo $user_data['role'] == 'warehouse' ? 'selected' : ''; ?>>Warehouse Staff</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>
+                                <input type="checkbox" name="active" <?php echo $user_data['active'] ? 'checked' : ''; ?>>
+                                Account Active
+                            </label>
+                        </div>
+                        
+                        <button type="submit" name="update_profile" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Save Changes
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Reset Password -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div class="panel-title"><i class="fas fa-key"></i> Reset Password</div>
+                    </div>
+                    <form method="POST">
+                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
+                        
+                        <div class="form-group">
+                            <label>New Password</label>
+                            <input type="password" name="new_password" required minlength="6">
+                            <small style="color: #666;">Minimum 6 characters</small>
+                        </div>
+                        
+                        <button type="submit" name="reset_password" class="btn btn-primary">
+                            <i class="fas fa-sync-alt"></i> Reset Password
+                        </button>
+                    </form>
+                    
+                    <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
+                        <h4 style="margin-bottom: 15px;">Account Details</h4>
+                        <div style="font-size: 14px; color: #666;">
+                            <p style="margin: 8px 0;">
+                                <strong>Created:</strong> <?php echo date('M d, Y', strtotime($user_data['created_at'])); ?>
+                            </p>
+                            <p style="margin: 8px 0;">
+                                <strong>Last Login:</strong> <?php echo $user_data['last_login'] ? date('M d, Y H:i', strtotime($user_data['last_login'])) : 'Never'; ?>
+                            </p>
+                            <p style="margin: 8px 0;">
+                                <strong>Last Updated:</strong> <?php echo date('M d, Y H:i', strtotime($user_data['updated_at'])); ?>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- end grid -->
+
+            <!-- Recent Activity -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fas fa-history"></i> Recent Activity</div>
+                </div>
+                <div class="activity-timeline">
+                    <?php if ($recent_activity->num_rows > 0): ?>
+                        <?php while ($activity = $recent_activity->fetch_assoc()): ?>
+                        <div class="activity-item">
+                            <div class="activity-action"><?php echo htmlspecialchars($activity['action']); ?></div>
+                            <div class="activity-desc"><?php echo htmlspecialchars($activity['description']); ?></div>
+                            <div class="activity-time"><?php echo time_ago($activity['created_at']); ?></div>
+                        </div>
+                        <?php endwhile; ?>
+                    <?php else: ?>
+                        <div class="empty-state">
+                            <i class="fas fa-inbox"></i>
+                            <h3>No activity yet</h3>
+                            <p>User activity will appear here</p>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div><!-- end activity panel -->
+
             <!-- Danger Zone -->
             <?php if ($edit_user_id != $_SESSION['user_id']): ?>
             <div class="danger-zone">
@@ -554,8 +711,9 @@ $recent_activity = $db->query("SELECT action, description, created_at
                 </button>
             </div>
             <?php endif; ?>
-        </div>
-    </div>
+
+        </div><!-- end .user-content -->
+    </div><!-- end .admin-container -->
     
     <!-- Add User Button -->
     <button class="add-user-btn" onclick="openAddUserModal()">
@@ -654,161 +812,3 @@ $recent_activity = $db->query("SELECT action, description, created_at
     </script>
 </body>
 </html>
-            
-            <!-- Profile Header -->
-            <div class="profile-header-admin">
-                <div class="profile-image-container">
-                    <img src="<?php echo htmlspecialchars($profile_image); ?>" alt="Profile" class="profile-image" id="profilePreview">
-                    <form method="POST" enctype="multipart/form-data" id="imageForm" style="display: inline;">
-                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
-                        <input type="hidden" name="upload_profile_image" value="1">
-                        <label for="imageInput" class="profile-image-upload">
-                            <i class="fas fa-camera" style="color: #1976d2;"></i>
-                        </label>
-                        <input type="file" id="imageInput" name="profile_image" style="display: none;" accept="image/*">
-                    </form>
-                </div>
-                <div class="profile-info" style="flex: 1;">
-                    <h1><?php echo htmlspecialchars($user_data['full_name']); ?></h1>
-                    <p style="font-size: 16px; opacity: 0.9;">@<?php echo htmlspecialchars($user_data['username']); ?></p>
-                    <p style="font-size: 14px; opacity: 0.85;"><i class="fas fa-envelope"></i> <?php echo htmlspecialchars($user_data['email']); ?></p>
-                    <div style="display: flex; gap: 10px; margin-top: 10px;">
-                        <span class="profile-badge">
-                            <i class="fas fa-shield-alt"></i> <?php echo get_role_display($user_data['role']); ?>
-                        </span>
-                        <span class="profile-badge" style="background: <?php echo $user_data['active'] ? 'rgba(76,175,80,0.3)' : 'rgba(239,83,80,0.3)'; ?>">
-                            <i class="fas fa-circle" style="font-size: 8px;"></i> 
-                            <?php echo $user_data['active'] ? 'Active' : 'Inactive'; ?>
-                        </span>
-                    </div>
-                    
-                    <div class="stats-mini">
-                        <div class="stat-mini">
-                            <div class="stat-mini-value"><?php echo $activity_stats['days_active']; ?></div>
-                            <div class="stat-mini-label">Days Active</div>
-                        </div>
-                        <div class="stat-mini">
-                            <div class="stat-mini-value"><?php echo $activity_stats['total_actions']; ?></div>
-                            <div class="stat-mini-label">Actions</div>
-                        </div>
-                        <div class="stat-mini">
-                            <div class="stat-mini-value">
-                                <?php 
-                                if ($activity_stats['last_activity']) {
-                                    $days = floor((time() - strtotime($activity_stats['last_activity'])) / 86400);
-                                    echo $days . 'd';
-                                } else {
-                                    echo 'Never';
-                                }
-                                ?>
-                            </div>
-                            <div class="stat-mini-label">Last Seen</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px;">
-                <!-- Edit Profile -->
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="panel-title"><i class="fas fa-user-edit"></i> Edit User Profile</div>
-                    </div>
-                    <form method="POST">
-                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
-                        
-                        <div class="form-group">
-                            <label>Full Name</label>
-                            <input type="text" name="full_name" value="<?php echo htmlspecialchars($user_data['full_name']); ?>" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Username</label>
-                            <input type="text" name="username" value="<?php echo htmlspecialchars($user_data['username']); ?>" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Email</label>
-                            <input type="email" name="email" value="<?php echo htmlspecialchars($user_data['email']); ?>" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Role</label>
-                            <select name="role" required>
-                                <option value="admin" <?php echo $user_data['role'] == 'admin' ? 'selected' : ''; ?>>Administrator</option>
-                                <option value="manager" <?php echo $user_data['role'] == 'manager' ? 'selected' : ''; ?>>Manager</option>
-                                <option value="sales" <?php echo $user_data['role'] == 'sales' ? 'selected' : ''; ?>>Sales Clerk</option>
-                                <option value="warehouse" <?php echo $user_data['role'] == 'warehouse' ? 'selected' : ''; ?>>Warehouse Staff</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>
-                                <input type="checkbox" name="active" <?php echo $user_data['active'] ? 'checked' : ''; ?>>
-                                Account Active
-                            </label>
-                        </div>
-                        
-                        <button type="submit" name="update_profile" class="btn btn-primary">
-                            <i class="fas fa-save"></i> Save Changes
-                        </button>
-                    </form>
-                </div>
-                
-                <!-- Reset Password -->
-                <div class="panel">
-                    <div class="panel-header">
-                        <div class="panel-title"><i class="fas fa-key"></i> Reset Password</div>
-                    </div>
-                    <form method="POST">
-                        <input type="hidden" name="user_id" value="<?php echo $edit_user_id; ?>">
-                        
-                        <div class="form-group">
-                            <label>New Password</label>
-                            <input type="password" name="new_password" required minlength="6">
-                            <small style="color: #666;">Minimum 6 characters</small>
-                        </div>
-                        
-                        <button type="submit" name="reset_password" class="btn btn-primary">
-                            <i class="fas fa-sync-alt"></i> Reset Password
-                        </button>
-                    </form>
-                    
-                    <div style="margin-top: 30px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
-                        <h4 style="margin-bottom: 15px;">Account Details</h4>
-                        <div style="font-size: 14px; color: #666;">
-                            <p style="margin: 8px 0;">
-                                <strong>Created:</strong> <?php echo date('M d, Y', strtotime($user_data['created_at'])); ?>
-                            </p>
-                            <p style="margin: 8px 0;">
-                                <strong>Last Login:</strong> <?php echo $user_data['last_login'] ? date('M d, Y H:i', strtotime($user_data['last_login'])) : 'Never'; ?>
-                            </p>
-                            <p style="margin: 8px 0;">
-                                <strong>Last Updated:</strong> <?php echo date('M d, Y H:i', strtotime($user_data['updated_at'])); ?>
-                            </p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Recent Activity -->
-            <div class="panel">
-                <div class="panel-header">
-                    <div class="panel-title"><i class="fas fa-history"></i> Recent Activity</div>
-                </div>
-                <div class="activity-timeline">
-                    <?php if ($recent_activity->num_rows > 0): ?>
-                        <?php while ($activity = $recent_activity->fetch_assoc()): ?>
-                        <div class="activity-item">
-                            <div class="activity-action"><?php echo htmlspecialchars($activity['action']); ?></div>
-                            <div class="activity-desc"><?php echo htmlspecialchars($activity['description']); ?></div>
-                            <div class="activity-time"><?php echo time_ago($activity['created_at']); ?></div>
-                        </div>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <div class="empty-state">
-                            <i class="fas fa-inbox"></i>
-                            <h3>No activity yet</h3>
-                            <p>User activity will appear here</p>
-                        </div>
-                    <?php endif;
